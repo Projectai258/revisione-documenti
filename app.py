@@ -10,14 +10,12 @@ from docx import Document
 from PyPDF2 import PdfReader
 from fpdf import FPDF
 
-st.write("Chiavi disponibili in st.secrets:", st.secrets.keys())
-
 # Configurazione logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # LEGGI LA CHIAVE DIRETTAMENTE DA st.secrets
-OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
+OPENROUTER_API_KEY = "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"
 if not OPENROUTER_API_KEY:
     st.error("⚠️ Errore: API Key di OpenRouter non trovata!")
     logger.error("API Key non trovata. L'applicazione si interrompe.")
