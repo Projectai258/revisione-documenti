@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import streamlit as st
 import openai
 import os
@@ -9,6 +10,8 @@ import markdown
 from docx import Document
 from PyPDF2 import PdfReader
 from fpdf import FPDF
+
+st.write("Chiavi disponibili in st.secrets:", st.secrets.keys())
 
 # Configurazione logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +26,7 @@ if not OPENROUTER_API_KEY:
 
 # Inizializza il client OpenAI per OpenRouter
 client = openai.OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
+
 
 # 🛑 Pattern critici (pre-compilati per efficienza)
 CRITICAL_PATTERNS = [
