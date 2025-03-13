@@ -8,27 +8,27 @@ from bs4 import BeautifulSoup
 import markdown
 from docx import Document
 from PyPDF2 import PdfReader
-from fpdf import FPDF, FPDFException
+from fpdf import FPDF
 
 # Configurazione logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# API key hardcoded (ricorda: per produzione è preferibile usare st.secrets)
+# 🔑 Carica la chiave API di OpenRouter (assicurati che sia relativa al modello google/gemini-exp-1206:free)
 OPENROUTER_API_KEY = "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"
 if not OPENROUTER_API_KEY:
-    st.error("⚠️ Errore: API Key di OpenRouter non trovata!")
+    st.error("⚠️ Errore: API Key di OpenRouter non trovata! Assicurati di averla impostata come variabile d'ambiente.")
     logger.error("API Key non trovata. L'applicazione si interrompe.")
     st.stop()
 
 # Inizializza il client OpenAI per OpenRouter
 client = openai.OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
 
-# Pattern critici (pre-compilati per efficienza)
+# 🛑 Pattern critici (pre-compilati per efficienza)
 CRITICAL_PATTERNS = [
-    r"\bIlias Contreas\b",
-    r"\bIlias\b",
-    r"\bContreas\b",
+    r"\bIlias Contreas\b",  
+    r"\bIlias\b",  
+    r"\bContreas\b",  
     r"\bJoey\b",
     r"\bMya\b",
     r"\bmia moglie\b",
@@ -48,13 +48,13 @@ CRITICAL_PATTERNS = [
 ]
 compiled_patterns = [re.compile(p, re.IGNORECASE) for p in CRITICAL_PATTERNS]
 
-# Opzioni di tono (descrizioni per riferimento, non visualizzate interamente)
+# 🔹 Opzioni di tono (non vengono visualizzate nell'interfaccia)
 TONE_OPTIONS = {
-    "Stile originale": "Mantieni lo stesso stile, stessa struttura della frase.",
+    "Stile originale": "Mantieni lo stesso stile del testo originale, stessa struttura della frase.",
     "Formale": "Riscrivi in modo formale e professionale.",
     "Informale": "Riscrivi in modo amichevole e colloquiale rivolto ad un lettore giovane.",
     "Tecnico": "Riscrivi con linguaggio tecnico e preciso.",
-    "Narrativo": "Riscrivi in stile descrittivo e coinvolgente per un pubblico giovanile.",
+    "Narrativo": "Riscrivi in stile descrittivo e coinvolgente direzionato ad un pubblico giovanile.",
     "Pubblicitario": "Riscrivi in modo persuasivo, come una pubblicità.",
     "Giornalistico": "Riscrivi in tono chiaro e informativo.",
 }
@@ -71,7 +71,7 @@ def extract_context(blocks, selected_block):
     return prev_block, next_block
 
 def ai_rewrite_text(text, prev_text, next_text, tone):
-    """Invia il prompt all'API per riscrivere il testo."""
+    """Prompt ottimizzato per richiedere la riscrittura del testo all'AI, usando il modello google/gemini-exp-1206:free."""
     prompt = (
         f"Context:\nPreceding: {prev_text}\nText: {text}\nFollowing: {next_text}\n\n"
         f"Rewrite the 'Text' in {tone} style. Remove any personal or identifiable details. "
@@ -79,24 +79,22 @@ def ai_rewrite_text(text, prev_text, next_text, tone):
     )
     try:
         response = client.chat.completions.create(
-            model="google/gemini-exp-1206:free",
+            model="google/gemini-exp-1206:free",  # Utilizzo del modello corretto
             messages=[{"role": "system", "content": prompt}],
             max_tokens=50
         )
         if response and hasattr(response, "choices") and response.choices:
-            result = response.choices[0].message.content.strip()
-            return result if result else text  # se vuoto, ritorna il testo originale
-        else:
-            error_message = "⚠️ Errore: Nessun testo valido restituito dall'API."
-            logger.error(error_message)
-            return text
+            return response.choices[0].message.content.strip()
+        error_message = "⚠️ Errore: Nessun testo valido restituito dall'API."
+        logger.error(error_message)
+        return error_message
     except Exception as e:
         error_message = f"⚠️ Errore nell'elaborazione: {e}"
-        logger.error(error_message)
-        return text
+        logger.error(f"Errore nella richiesta API: {e}")
+        return error_message
 
 def process_html_content(html_content, modifications, highlight=False):
-    """Sostituisce i blocchi modificati nel contenuto HTML."""
+    """Elabora il contenuto HTML sostituendo i blocchi modificati (inclusi tag h5)."""
     soup = BeautifulSoup(html_content, "html.parser")
     for tag in soup.find_all(["p", "span", "div", "li", "a", "h5"]):
         if tag.string:
@@ -113,7 +111,7 @@ def process_html_content(html_content, modifications, highlight=False):
     return str(soup)
 
 def generate_html_preview(blocks, modifications, highlight=False):
-    """Genera un'anteprima in HTML da una lista di blocchi."""
+    """Genera un'anteprima in HTML da una lista di blocchi testuali."""
     html = ""
     for block in blocks:
         mod_text = modifications.get(block, block)
@@ -123,18 +121,17 @@ def generate_html_preview(blocks, modifications, highlight=False):
             html += f"<p>{mod_text}</p>"
     return html
 
-# Impostazione pagina
 st.set_page_config(page_title="Revisione Documenti", layout="wide")
 st.title("📄 Revisione Documenti")
-st.write("Carica un file (HTML, Markdown, Word o PDF) e scegli i blocchi da revisionare.")
+st.write("Carica un file (HTML, Markdown, Word o PDF) e scegli i blocchi di testo da revisionare.")
 
-# Caricamento file
 uploaded_file = st.file_uploader("📂 Seleziona un file (html, md, doc, docx, pdf)", type=["html", "md", "doc", "docx", "pdf"])
 
 if uploaded_file is not None:
     file_extension = uploaded_file.name.split('.')[-1].lower()
     modifications = {}
     
+    # --- Sezione per HTML e Markdown ---
     if file_extension in ["html", "md"]:
         file_content = uploaded_file.read().decode("utf-8")
         html_content = file_content if file_extension == "html" else markdown.markdown(file_content)
@@ -158,10 +155,10 @@ if uploaded_file is not None:
                     mod_block = ""
                     while attempts < 3:
                         mod_block = ai_rewrite_text(block, prev_block, next_block, selected_tone)
-                        if mod_block and "Errore" not in mod_block:
+                        if "Errore" not in mod_block:
                             break
                         attempts += 1
-                    modifications[block] = mod_block if mod_block.strip() else block
+                    modifications[block] = mod_block
                 elif action == "Elimina":
                     modifications[block] = ""
                 elif action == "Ignora":
@@ -172,24 +169,23 @@ if uploaded_file is not None:
             
             if st.button("✍️ Genera Documento Revisionato"):
                 with st.spinner("🔄 Riscrittura in corso..."):
-                    preview_html = process_html_content(html_content, modifications, highlight=True)
-                    final_html = process_html_content(html_content, modifications, highlight=False)
-                    st.session_state["preview_content"] = preview_html
-                    st.session_state["final_content"] = final_html
+                    st.session_state["preview_content"] = process_html_content(html_content, modifications, highlight=True)
+                    st.session_state["final_content"] = process_html_content(html_content, modifications, highlight=False)
                 st.success("✅ Revisione completata!")
-                st.subheader("🌍 Anteprima con Testo Formattato")
-                st.markdown(st.session_state["preview_content"], unsafe_allow_html=True)
+                st.subheader("🌍 Anteprima con Testo Evidenziato")
+                st.components.v1.html(st.session_state["preview_content"], height=500, scrolling=True)
                 st.download_button("📥 Scarica HTML Revisionato", st.session_state["final_content"].encode("utf-8"), "document_revised.html", "text/html")
         else:
             st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel testo.")
     
+    # --- Sezione per file Word ---
     elif file_extension in ["doc", "docx"]:
         try:
             doc = Document(uploaded_file)
         except Exception as e:
             st.error(f"Errore nell'apertura del file Word: {e}")
             st.stop()
-        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip() != ""]
         blocks_to_review = {f"{i}_{p}": p for i, p in enumerate(paragraphs) if any(pattern.search(p) for pattern in compiled_patterns)}
         
         if blocks_to_review:
@@ -208,10 +204,10 @@ if uploaded_file is not None:
                     mod_par = ""
                     while attempts < 3:
                         mod_par = ai_rewrite_text(paragraph, prev_par, next_par, selected_tone)
-                        if mod_par and "Errore" not in mod_par:
+                        if "Errore" not in mod_par:
                             break
                         attempts += 1
-                    modifications[paragraph] = mod_par if mod_par.strip() else paragraph
+                    modifications[paragraph] = mod_par
                 elif action == "Elimina":
                     modifications[paragraph] = ""
                 elif action == "Ignora":
@@ -230,12 +226,13 @@ if uploaded_file is not None:
                     st.session_state["final_docx"] = buffer.getvalue()
                     preview_html = generate_html_preview(paragraphs, modifications, highlight=True)
                 st.success("✅ Revisione completata!")
-                st.subheader("🌍 Anteprima con Testo Formattato")
-                st.markdown(preview_html, unsafe_allow_html=True)
+                st.subheader("🌍 Anteprima con Testo Evidenziato")
+                st.components.v1.html(preview_html, height=500, scrolling=True)
                 st.download_button("📥 Scarica Documento Word Revisionato", st.session_state["final_docx"], "document_revised.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         else:
             st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel documento Word.")
     
+    # --- Sezione per file PDF ---
     elif file_extension == "pdf":
         try:
             pdf_reader = PdfReader(uploaded_file)
@@ -246,7 +243,7 @@ if uploaded_file is not None:
         for page in pdf_reader.pages:
             text = page.extract_text()
             if text:
-                paragraphs.extend([line.strip() for line in text.split("\n") if line.strip()])
+                paragraphs.extend([line.strip() for line in text.split("\n") if line.strip() != ""])
         blocks_to_review = {f"{i}_{p}": p for i, p in enumerate(paragraphs) if any(pattern.search(p) for pattern in compiled_patterns)}
         
         if blocks_to_review:
@@ -265,10 +262,10 @@ if uploaded_file is not None:
                     mod_block = ""
                     while attempts < 3:
                         mod_block = ai_rewrite_text(block, prev_block, next_block, selected_tone)
-                        if mod_block and "Errore" not in mod_block:
+                        if "Errore" not in mod_block:
                             break
                         attempts += 1
-                    modifications[block] = mod_block if mod_block.strip() else block
+                    modifications[block] = mod_block
                 elif action == "Elimina":
                     modifications[block] = ""
                 elif action == "Ignora":
@@ -284,21 +281,14 @@ if uploaded_file is not None:
                     pdf.set_auto_page_break(auto=True, margin=15)
                     pdf.set_font("Arial", size=12)
                     for par in paragraphs:
-                        text_to_print = modifications.get(par, par)
-                        # Salta se il testo è vuoto o troppo lungo senza spazi
-                        if not text_to_print.strip():
-                            continue
-                        try:
-                            pdf.multi_cell(0, 10, text_to_print)
-                        except FPDFException as e:
-                            logger.error(f"Errore FPDF per il paragrafo: {text_to_print} - {e}")
+                        pdf.multi_cell(0, 10, modifications.get(par, par))
                     pdf_buffer = io.BytesIO()
                     pdf.output(pdf_buffer, 'F')
                     st.session_state["final_pdf"] = pdf_buffer.getvalue()
                     preview_html = generate_html_preview(paragraphs, modifications, highlight=True)
                 st.success("✅ Revisione completata!")
-                st.subheader("🌍 Anteprima con Testo Formattato")
-                st.markdown(preview_html, unsafe_allow_html=True)
+                st.subheader("🌍 Anteprima con Testo Evidenziato")
+                st.components.v1.html(preview_html, height=500, scrolling=True)
                 st.download_button("📥 Scarica PDF Revisionato", st.session_state["final_pdf"], "document_revised.pdf", "application/pdf")
         else:
             st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel documento PDF.")
