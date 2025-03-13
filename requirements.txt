@@ -1,0 +1,7 @@
+streamlit
+openai
+beautifulsoup4
+markdown
+python-docx
+PyPDF2
+fpdf2
