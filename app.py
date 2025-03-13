@@ -14,10 +14,10 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 🔑 Carica la chiave API di OpenRouter (assicurati che sia relativa al modello google/gemini-exp-1206:free)
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+# LEGGI LA CHIAVE DIRETTAMENTE DA st.secrets
+OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
 if not OPENROUTER_API_KEY:
-    st.error("⚠️ Errore: API Key di OpenRouter non trovata! Assicurati di averla impostata come variabile d'ambiente.")
+    st.error("⚠️ Errore: API Key di OpenRouter non trovata!")
     logger.error("API Key non trovata. L'applicazione si interrompe.")
     st.stop()
 
