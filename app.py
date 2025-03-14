@@ -4,20 +4,24 @@ import os
 import re
 import logging
 import io
+from dotenv import load_dotenv
 from bs4 import BeautifulSoup  
 import markdown
 from docx import Document
 from PyPDF2 import PdfReader
 from fpdf import FPDF
 
+# Carica le variabili d'ambiente dal file API.env
+load_dotenv()
+
 # Configurazione logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Carica la chiave API da variabile d'ambiente (o da st.secrets)
-API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
+# Recupera la chiave API da una variabile d'ambiente
+API_KEY = os.getenv("OPENROUTER_API_KEY")
 if not API_KEY:
-    st.error("⚠️ Errore: API Key di OpenRouter non trovata! Impostala come variabile d'ambiente o in st.secrets.")
+    st.error("⚠️ Errore: API Key di OpenRouter non trovata! Impostala nel file .env.")
     logger.error("API Key non trovata. L'applicazione si interrompe.")
     st.stop()
 
@@ -202,7 +206,7 @@ if uploaded_file is not None:
                     modifications[blocco] = mod_blocco
                 elif azione == "Elimina":
                     modifications[blocco] = ""
-                else:  # Ignora
+                else:
                     modifications[blocco] = blocco
                 count += 1
                 progress_bar.progress(count / total)
