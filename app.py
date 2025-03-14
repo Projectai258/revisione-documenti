@@ -55,7 +55,6 @@ CRITICAL_PATTERNS = [
     r"\bsocio\b",
     r"\surf\b",
     r"\sottoscritto\b",
-    r"\bintervista\b",
     r"Mi chiamo .*? la mia esperienza personale\.",
     r"\bfiglio di papà\b",
     r"\bhappy our\b",
