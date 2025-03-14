@@ -82,7 +82,7 @@ def ai_rewrite_text(text, prev_text, next_text, tone):
     )
     try:
         response = client.chat.completions.create(
-            model="google/gemini-2.0-pro-exp-02-05:free"",
+            model="google/gemini-2.0-pro-exp-02-05:free",
             messages=[{"role": "system", "content": prompt}],
             max_tokens=70
         )
