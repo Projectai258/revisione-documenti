@@ -11,16 +11,16 @@ from docx import Document
 from PyPDF2 import PdfReader
 from fpdf import FPDF
 
-st.write("Contenuto di st.secrets:", st.secrets)
-
-# Carica le variabili d'ambiente dal file .env (utile in locale)
+# Carica le variabili d'ambiente
 load_dotenv()
 
-# Configurazione logging
+# Imposta la configurazione della pagina *prima* di qualsiasi altra chiamata Streamlit
+st.set_page_config(page_title="Revisione Documenti", layout="wide")
+
+# Ora puoi fare il resto
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Recupera la chiave API: prima dalle variabili d'ambiente, poi da st.secrets
 API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
 if not API_KEY:
     st.error("⚠️ Errore: API Key di OpenRouter non trovata! Impostala come variabile d'ambiente o in st.secrets.")
