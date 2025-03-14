@@ -27,6 +27,8 @@ if not API_KEY:
 # Inizializza il client OpenAI per OpenRouter
 client = openai.OpenAI(api_key=API_KEY, base_url="https://openrouter.ai/api/v1")
 
+st.write("Contenuto di st.secrets:", st.secrets)
+
 # Definizione dei pattern critici per identificare blocchi sensibili
 CRITICAL_PATTERNS = [
     r"\bIlias Contreas\b",
