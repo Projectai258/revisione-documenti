@@ -6,3 +6,4 @@ python-docx
 PyPDF2
 fpdf2
 python-dotenv
+lxml
