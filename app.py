@@ -11,26 +11,26 @@ from docx import Document
 from PyPDF2 import PdfReader
 from fpdf import FPDF
 
-# 1) Carica variabili d'ambiente (solo Python, nessuna funzione di Streamlit)
+# Carica .env (ok, non usa funzioni st.)
 load_dotenv()
 
-# 2) PRIMA di qualunque altra chiamata Streamlit, imposta la configurazione della pagina
+# 1) DEVE ESSERE il PRIMO comando di Streamlit
 st.set_page_config(page_title="Revisione Documenti", layout="wide")
 
-# 3) Configurazione logging e altre impostazioni Python
+# 2) Configurazione logging e altre configurazioni Python (no st.*)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 4) Recupera la chiave API (ma NON usare st.error prima di st.set_page_config)
+# 3) Recupera la chiave API (no st.* prima)
 API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
+
+# 4) Ora si possono usare i comandi st.XXX
 if not API_KEY:
     st.error("⚠️ Errore: API Key di OpenRouter non trovata! Impostala come variabile d'ambiente o in st.secrets.")
     st.stop()
 
-# 5) Ora puoi usare qualsiasi funzione di Streamlit
 st.title("📄 Revisione Documenti")
-st.write("Carica un file (HTML, Markdown, Word o PDF) e scegli i blocchi di testo da revisionare.")
-
+st.write("Carica un file e scegli i blocchi di testo da revisionare.")
 
 # Inizializza il client OpenAI per OpenRouter
 client = openai.OpenAI(api_key=API_KEY, base_url="https://openrouter.ai/api/v1")
