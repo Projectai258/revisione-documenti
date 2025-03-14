@@ -5,37 +5,42 @@ import re
 import logging
 import io
 from dotenv import load_dotenv
-from bs4 import BeautifulSoup  
+from bs4 import BeautifulSoup
 import markdown
 from docx import Document
 from PyPDF2 import PdfReader
 from fpdf import FPDF
 
-# Carica .env (ok, non usa funzioni st.)
+########################################
+# 1) Carica variabili d'ambiente (solo Python)
+########################################
 load_dotenv()
 
-# 1) DEVE ESSERE il PRIMO comando di Streamlit
+########################################
+# 2) PRIMO comando Streamlit
+########################################
 st.set_page_config(page_title="Revisione Documenti", layout="wide")
 
-# 2) Configurazione logging e altre configurazioni Python (no st.*)
+########################################
+# 3) Configurazione logging e altre impostazioni Python
+########################################
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 3) Recupera la chiave API (no st.* prima)
+########################################
+# 4) Recupera la chiave API
+########################################
 API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
-
-# 4) Ora si possono usare i comandi st.XXX
 if not API_KEY:
     st.error("⚠️ Errore: API Key di OpenRouter non trovata! Impostala come variabile d'ambiente o in st.secrets.")
     st.stop()
 
-st.title("📄 Revisione Documenti")
-st.write("Carica un file e scegli i blocchi di testo da revisionare.")
-
 # Inizializza il client OpenAI per OpenRouter
 client = openai.OpenAI(api_key=API_KEY, base_url="https://openrouter.ai/api/v1")
 
-# Definizione dei pattern critici per identificare blocchi sensibili
+########################################
+# Definizione dei pattern critici
+########################################
 CRITICAL_PATTERNS = [
     r"\bIlias Contreas\b",
     r"\bIlias\b",
@@ -59,7 +64,9 @@ CRITICAL_PATTERNS = [
 ]
 compiled_patterns = [re.compile(p, re.IGNORECASE) for p in CRITICAL_PATTERNS]
 
+########################################
 # Opzioni di tono per la riscrittura
+########################################
 TONE_OPTIONS = {
     "Stile originale": "Mantieni lo stesso stile del testo originale, stessa struttura della frase.",
     "Formale": "Riscrivi in modo formale e professionale.",
@@ -70,6 +77,9 @@ TONE_OPTIONS = {
     "Giornalistico": "Riscrivi in tono chiaro e informativo.",
 }
 
+########################################
+# Funzioni di supporto
+########################################
 def extract_context(blocks, selected_block):
     """Estrae il blocco precedente e successivo per fornire contesto al modello."""
     try:
@@ -90,9 +100,9 @@ def ai_rewrite_text(text, prev_text, next_text, tone):
     )
     try:
         response = client.chat.completions.create(
-            model="google/gemini-2.0-pro-exp-02-05:free",
+            model="google/gemini-2.0-pro-exp-02-05:free",  # o qualunque altro modello tu voglia
             messages=[{"role": "system", "content": prompt}],
-            max_tokens=70
+            max_tokens=50
         )
         if response and hasattr(response, "choices") and response.choices:
             return response.choices[0].message.content.strip()
@@ -133,7 +143,7 @@ def generate_html_preview(blocks, modifications, highlight=False):
     return html
 
 def process_file_content(file_content, file_extension):
-    """Elabora il contenuto in base al tipo di file e ritorna una tupla (lista blocchi, contenuto originale)"""
+    """Elabora il contenuto in base al tipo di file e ritorna (lista_blocchi, contenuto_html)."""
     if file_extension == "html":
         html_content = file_content
     elif file_extension == "md":
@@ -174,8 +184,10 @@ def filtra_blocchi(blocchi):
     """Filtra i blocchi che corrispondono a uno dei pattern critici."""
     return {f"{i}_{b}": b for i, b in enumerate(blocchi) if any(pattern.search(b) for pattern in compiled_patterns)}
 
-# Configurazione Streamlit
-st.set_page_config(page_title="Revisione Documenti", layout="wide")
+########################################
+# 5) Ora logica principale Streamlit
+########################################
+
 st.title("📄 Revisione Documenti")
 st.write("Carica un file (HTML, Markdown, Word o PDF) e scegli i blocchi di testo da revisionare.")
 
