@@ -75,7 +75,20 @@ TONE_OPTIONS = {
 }
 
 ########################################
-# Funzioni di supporto
+# Funzione per conversione da prima persona singolare a plurale
+########################################
+def convert_first_singular_to_plural(text):
+    # Sostituzioni di esempio (puoi raffinarle ulteriormente)
+    text = re.sub(r'\b[Ii]o\b', 'noi', text)
+    text = re.sub(r'\b[Mm]io\b', 'nostro', text)
+    text = re.sub(r'\b[Mm]ia\b', 'nostra', text)
+    text = re.sub(r'\b[Mm]iei\b', 'nostri', text)
+    text = re.sub(r'\b[Mm]ie\b', 'nostre', text)
+    text = re.sub(r'\b[Mm]i\b', 'ci', text)
+    return text
+
+########################################
+# Funzioni di supporto comuni
 ########################################
 def extract_context(blocks, selected_block):
     """Estrae il blocco precedente e successivo per fornire contesto al modello."""
@@ -97,7 +110,7 @@ def ai_rewrite_text(text, prev_text, next_text, tone):
     )
     try:
         response = client.chat.completions.create(
-            model="google/gemini-2.0-pro-exp-02-05:free",  # Sostituisci con il modello desiderato
+            model="google/gemini-2.0-pro-exp-02-05:free",
             messages=[{"role": "system", "content": prompt}],
             max_tokens=50
         )
@@ -140,7 +153,7 @@ def generate_html_preview(blocks, modifications, highlight=False):
     return html
 
 def process_file_content(file_content, file_extension):
-    """Elabora il contenuto in base al tipo di file e ritorna (lista_blocchi, contenuto_html)."""
+    """Elabora il contenuto per file HTML/Markdown e ritorna (lista_blocchi, contenuto_html)."""
     if file_extension == "html":
         html_content = file_content
     elif file_extension == "md":
@@ -164,7 +177,7 @@ def process_doc_file(uploaded_file):
         st.stop()
 
 def process_pdf_file(uploaded_file):
-    """Estrae il testo da un file PDF."""
+    """Estrae il testo da un file PDF (usato per mostrare i blocchi da revisionare)."""
     try:
         pdf_reader = PdfReader(uploaded_file)
     except Exception as e:
@@ -178,172 +191,224 @@ def process_pdf_file(uploaded_file):
     return paragraphs
 
 def filtra_blocchi(blocchi):
-    """Filtra i blocchi che corrispondono a uno dei pattern critici."""
+    """Filtra i blocchi che corrispondono ai pattern critici."""
     return {f"{i}_{b}": b for i, b in enumerate(blocchi) if any(pattern.search(b) for pattern in compiled_patterns)}
 
 ########################################
-# 5) Ora logica principale Streamlit
+# Funzione per elaborare PDF con overlay (usando PyMuPDF)
+########################################
+def process_pdf_with_overlay(uploaded_file, modifications):
+    """
+    Apre il PDF originale con PyMuPDF (fitz), cerca i blocchi di testo che contengono il testo originale (presenti in modifications),
+    aggiunge un'annotazione di redazione per cancellare il testo originale e inserisce il testo revisionato nello stesso rettangolo.
+    Ritorna il PDF modificato come bytes.
+    """
+    import fitz  # PyMuPDF
+    doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+    for page in doc:
+        blocks = page.get_text("blocks")
+        for b in blocks:
+            block_text = b[4].strip()
+            for original, revised in modifications.items():
+                if original in block_text:
+                    rect = fitz.Rect(b[0], b[1], b[2], b[3])
+                    page.add_redact_annot(rect, fill=(1,1,1))
+                    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+                    # Inserisce il testo revisionato nello stesso rettangolo, centrato
+                    page.insert_textbox(rect, revised, fontsize=12, fontname="helv", align=1)
+    output = io.BytesIO()
+    doc.save(output)
+    return output.getvalue()
+
+########################################
+# Selezione modalità e flag di conversione globale
+########################################
+# Modalità di revisione (rimane la scelta per blocchi)
+modalita = st.radio(
+    "Modalità di revisione:",
+    ("Revisiona blocchi corrispondenti", "Conversione intera (solo)", "Revisiona blocchi e applica conversione globale")
+)
+# Se la modalità scelta è "Revisiona blocchi e applica conversione globale", il flag sarà True
+global_conversion = modalita == "Revisiona blocchi e applica conversione globale"
+
+########################################
+# Logica principale Streamlit
 ########################################
 
 st.title("📄 Revisione Documenti")
-st.write("Carica un file (HTML, Markdown, Word o PDF) e scegli i blocchi di testo da revisionare.")
+st.write("Carica un file (HTML, Markdown, Word o PDF) e scegli come intervenire sul testo.")
 
 uploaded_file = st.file_uploader("📂 Seleziona un file (html, md, doc, docx, pdf)", type=["html", "md", "doc", "docx", "pdf"])
 
 if uploaded_file is not None:
     file_extension = uploaded_file.name.split('.')[-1].lower()
-    modifications = {}
     
-    if file_extension in ["html", "md"]:
-        # Elaborazione per HTML e Markdown
-        file_content = uploaded_file.read().decode("utf-8")
-        blocchi, html_content = process_file_content(file_content, file_extension)
-        blocchi_da_revisionare = filtra_blocchi(blocchi)
-        
-        if blocchi_da_revisionare:
-            st.subheader("📌 Blocchi da revisionare")
-            progress_text = st.empty()
-            progress_bar = st.progress(0)
-            total = len(blocchi_da_revisionare)
-            count = 0
-            for uid, blocco in blocchi_da_revisionare.items():
-                st.markdown(f"**{blocco}**")
-                azione = st.radio("Azione per questo blocco:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
-                if azione == "Riscrivi":
-                    tono = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
-                    prev_blocco, next_blocco = extract_context(blocchi, blocco)
-                    attempts = 0
-                    mod_blocco = ""
-                    while attempts < 3:
-                        mod_blocco = ai_rewrite_text(blocco, prev_blocco, next_blocco, tono)
-                        if "Errore" not in mod_blocco:
-                            break
-                        attempts += 1
-                    modifications[blocco] = mod_blocco
-                elif azione == "Elimina":
-                    modifications[blocco] = ""
-                else:
-                    modifications[blocco] = blocco
-                count += 1
-                progress_bar.progress(count / total)
-                progress_text.text(f"Elaborati {count} di {total} blocchi...")
-            
-            if st.button("✍️ Genera Documento Revisionato"):
-                with st.spinner("🔄 Riscrittura in corso..."):
-                    st.session_state["preview_content"] = process_html_content(html_content, modifications, highlight=True)
-                    st.session_state["final_content"] = process_html_content(html_content, modifications, highlight=False)
-                st.success("✅ Revisione completata!")
-                st.subheader("🌍 Anteprima con Testo Evidenziato")
-                st.components.v1.html(st.session_state["preview_content"], height=500, scrolling=True)
-                st.download_button("📥 Scarica HTML Revisionato", st.session_state["final_content"].encode("utf-8"), "document_revised.html", "text/html")
-        else:
-            st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel testo.")
+    # Modalità "Conversione intera (solo)"
+    if modalita == "Conversione intera (solo)":
+        if file_extension in ["html", "md"]:
+            file_content = uploaded_file.read().decode("utf-8")
+            converted_text = convert_first_singular_to_plural(file_content)
+            st.subheader("📌 Testo Revisionato (Conversione Intera)")
+            st.code(converted_text, language="html" if file_extension=="html" else "plaintext")
+            if st.button("📥 Scarica File Revisionato"):
+                st.download_button("Scarica Revisionato", converted_text.encode("utf-8"), "document_revised.html" if file_extension=="html" else "document_revised.txt", "text/html" if file_extension=="html" else "text/plain")
+        elif file_extension in ["doc", "docx"]:
+            paragraphs = process_doc_file(uploaded_file)
+            full_text = "\n".join(paragraphs)
+            converted_text = convert_first_singular_to_plural(full_text)
+            st.subheader("📌 Testo Revisionato (Conversione Intera)")
+            st.code(converted_text, language="plaintext")
+            if st.button("📥 Scarica Documento Revisionato"):
+                new_doc = Document()
+                new_doc.add_paragraph(converted_text)
+                buffer = io.BytesIO()
+                new_doc.save(buffer)
+                st.download_button("Scarica Documento Revisionato", buffer.getvalue(), "document_revised.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        elif file_extension == "pdf":
+            paragraphs = process_pdf_file(uploaded_file)
+            full_text = "\n".join(paragraphs)
+            converted_text = convert_first_singular_to_plural(full_text)
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.set_font("Arial", size=12)
+            pdf.multi_cell(0, 10, converted_text)
+            buffer = io.BytesIO()
+            pdf.output(buffer, 'F')
+            st.subheader("📌 PDF Revisionato (Conversione Intera)")
+            if st.button("📥 Scarica PDF Revisionato"):
+                st.download_button("Scarica PDF Revisionato", buffer.getvalue(), "document_revised.pdf", "application/pdf")
     
-    elif file_extension in ["doc", "docx"]:
-        # Elaborazione per file Word
-        paragrafi = process_doc_file(uploaded_file)
-        blocchi_da_revisionare = filtra_blocchi(paragrafi)
+    # Modalità "Revisiona blocchi corrispondenti" oppure "Revisiona blocchi e applica conversione globale"
+    else:
+        modifications = {}
+        if file_extension in ["html", "md"]:
+            file_content = uploaded_file.read().decode("utf-8")
+            blocchi, html_content = process_file_content(file_content, file_extension)
+            blocchi_da_revisionare = filtra_blocchi(blocchi)
+            if blocchi_da_revisionare:
+                st.subheader("📌 Blocchi da revisionare")
+                progress_text = st.empty()
+                progress_bar = st.progress(0)
+                total = len(blocchi_da_revisionare)
+                count = 0
+                for uid, blocco in blocchi_da_revisionare.items():
+                    st.markdown(f"**{blocco}**")
+                    azione = st.radio("Azione per questo blocco:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
+                    if azione == "Riscrivi":
+                        tono = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
+                        prev_blocco, next_blocco = extract_context(blocchi, blocco)
+                        attempts = 0
+                        mod_blocco = ""
+                        while attempts < 3:
+                            mod_blocco = ai_rewrite_text(blocco, prev_blocco, next_blocco, tono)
+                            if "Errore" not in mod_blocco:
+                                break
+                            attempts += 1
+                        modifications[blocco] = mod_blocco
+                    elif azione == "Elimina":
+                        modifications[blocco] = ""
+                    else:
+                        modifications[blocco] = blocco
+                    count += 1
+                    progress_bar.progress(count / total)
+                    progress_text.text(f"Elaborati {count} di {total} blocchi...")
+                # Applica conversione globale al testo finale se il flag è attivo
+                final_content = process_html_content(html_content, modifications, highlight=True)
+                if global_conversion:
+                    final_content = convert_first_singular_to_plural(final_content)
+                if st.button("✍️ Genera Documento Revisionato"):
+                    with st.spinner("🔄 Riscrittura in corso..."):
+                        st.session_state["preview_content"] = final_content
+                    st.success("✅ Revisione completata!")
+                    st.subheader("🌍 Anteprima con Testo Revisionato")
+                    st.components.v1.html(st.session_state["preview_content"], height=500, scrolling=True)
+                    st.download_button("📥 Scarica HTML Revisionato", st.session_state["preview_content"].encode("utf-8"), "document_revised.html", "text/html")
+            else:
+                st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel testo.")
         
-        if blocchi_da_revisionare:
-            st.subheader("📌 Paragrafi da revisionare")
-            progress_text = st.empty()
-            progress_bar = st.progress(0)
-            total = len(blocchi_da_revisionare)
-            count = 0
-            for uid, paragrafo in blocchi_da_revisionare.items():
-                st.markdown(f"**{paragrafo}**")
-                azione = st.radio("Azione per questo paragrafo:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
-                if azione == "Riscrivi":
-                    tono = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
-                    prev_par, next_par = extract_context(paragrafi, paragrafo)
-                    attempts = 0
-                    mod_par = ""
-                    while attempts < 3:
-                        mod_par = ai_rewrite_text(paragrafo, prev_par, next_par, tono)
-                        if "Errore" not in mod_par:
-                            break
-                        attempts += 1
-                    modifications[paragrafo] = mod_par
-                elif azione == "Elimina":
-                    modifications[paragrafo] = ""
-                else:
-                    modifications[paragrafo] = paragrafo
-                count += 1
-                progress_bar.progress(count / total)
-                progress_text.text(f"Elaborati {count} di {total} paragrafi...")
-            
-            if st.button("✍️ Genera Documento Word Revisionato"):
-                with st.spinner("🔄 Riscrittura in corso..."):
-                    nuovo_doc = Document()
-                    for par in paragrafi:
-                        nuovo_doc.add_paragraph(modifications.get(par, par))
-                    buffer = io.BytesIO()
-                    nuovo_doc.save(buffer)
-                    st.session_state["final_docx"] = buffer.getvalue()
-                    preview_html = generate_html_preview(paragrafi, modifications, highlight=True)
+        elif file_extension in ["doc", "docx"]:
+            paragrafi = process_doc_file(uploaded_file)
+            blocchi_da_revisionare = filtra_blocchi(paragrafi)
+            if blocchi_da_revisionare:
+                st.subheader("📌 Paragrafi da revisionare")
+                progress_text = st.empty()
+                progress_bar = st.progress(0)
+                total = len(blocchi_da_revisionare)
+                count = 0
+                for uid, paragrafo in blocchi_da_revisionare.items():
+                    st.markdown(f"**{paragrafo}**")
+                    azione = st.radio("Azione per questo paragrafo:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
+                    if azione == "Riscrivi":
+                        tono = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
+                        prev_par, next_par = extract_context(paragrafi, paragrafo)
+                        attempts = 0
+                        mod_par = ""
+                        while attempts < 3:
+                            mod_par = ai_rewrite_text(paragrafo, prev_par, next_par, tono)
+                            if "Errore" not in mod_par:
+                                break
+                            attempts += 1
+                        modifications[paragrafo] = mod_par
+                    elif azione == "Elimina":
+                        modifications[paragrafo] = ""
+                    else:
+                        modifications[paragrafo] = paragrafo
+                    count += 1
+                    progress_bar.progress(count / total)
+                    progress_text.text(f"Elaborati {count} di {total} paragrafi...")
+                # Crea il documento Word e applica conversione globale se richiesto
+                full_text = "\n".join([modifications.get(p, p) for p in paragrafi])
+                if global_conversion:
+                    full_text = convert_first_singular_to_plural(full_text)
+                new_doc = Document()
+                new_doc.add_paragraph(full_text)
+                buffer = io.BytesIO()
+                new_doc.save(buffer)
                 st.success("✅ Revisione completata!")
-                st.subheader("🌍 Anteprima con Testo Evidenziato")
-                st.components.v1.html(preview_html, height=500, scrolling=True)
-                st.download_button("📥 Scarica Documento Word Revisionato", st.session_state["final_docx"], "document_revised.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-        else:
-            st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel documento Word.")
-    
-    elif file_extension == "pdf":
-        # Elaborazione per file PDF
-        paragrafi = process_pdf_file(uploaded_file)
-        blocchi_da_revisionare = filtra_blocchi(paragrafi)
+                st.subheader("🌍 Anteprima Testo (Word)")
+                st.download_button("📥 Scarica Documento Word Revisionato", buffer.getvalue(), "document_revised.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            else:
+                st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel documento Word.")
         
-        if blocchi_da_revisionare:
-            st.subheader("📌 Blocchi di testo da revisionare (PDF)")
-            progress_text = st.empty()
-            progress_bar = st.progress(0)
-            total = len(blocchi_da_revisionare)
-            count = 0
-            for uid, blocco in blocchi_da_revisionare.items():
-                st.markdown(f"**{blocco}**")
-                azione = st.radio("Azione per questo blocco:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
-                if azione == "Riscrivi":
-                    tono = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
-                    prev_blocco, next_blocco = extract_context(paragrafi, blocco)
-                    attempts = 0
-                    mod_blocco = ""
-                    while attempts < 3:
-                        mod_blocco = ai_rewrite_text(blocco, prev_blocco, next_blocco, tono)
-                        if "Errore" not in mod_blocco:
-                            break
-                        attempts += 1
-                    modifications[blocco] = mod_blocco
-                elif azione == "Elimina":
-                    modifications[blocco] = ""
-                else:
-                    modifications[blocco] = blocco
-                count += 1
-                progress_bar.progress(count / total)
-                progress_text.text(f"Elaborati {count} di {total} blocchi...")
-            
-            if st.button("✍️ Genera PDF Revisionato"):
-                with st.spinner("🔄 Riscrittura in corso..."):
-                    pdf = FPDF()
-                    pdf.add_page()
-                    pdf.set_auto_page_break(auto=True, margin=15)
-                    
-                    # -- AGGIUNTA: Registra e usa un font TTF con supporto Unicode --
-                    # Assicurati che "DejaVuSansCondensed.ttf" sia presente nella stessa cartella di app.py
-                    font_path = os.path.join(os.path.dirname(__file__), "DejaVuSansCondensed.ttf")
-                    pdf.add_font("DejaVu", "", font_path, uni=True)
-                    pdf.set_font("DejaVu", "", 12)
-                    # ------------------------------------------------------------
-
-                    for par in paragrafi:
-                        testo_finale = modifications.get(par, par)
-                        pdf.multi_cell(0, 10, testo_finale)
-                    pdf_buffer = io.BytesIO()
-                    pdf.output(pdf_buffer, 'F')
-                    st.session_state["final_pdf"] = pdf_buffer.getvalue()
-                    preview_html = generate_html_preview(paragrafi, modifications, highlight=True)
-                st.success("✅ Revisione completata!")
-                st.subheader("🌍 Anteprima con Testo Evidenziato")
-                st.components.v1.html(preview_html, height=500, scrolling=True)
-                st.download_button("📥 Scarica PDF Revisionato", st.session_state["final_pdf"], "document_revised.pdf", "application/pdf")
-        else:
-            st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel documento PDF.")
+        elif file_extension == "pdf":
+            paragrafi = process_pdf_file(uploaded_file)
+            blocchi_da_revisionare = filtra_blocchi(paragrafi)
+            if blocchi_da_revisionare:
+                st.subheader("📌 Blocchi di testo da revisionare (PDF)")
+                progress_text = st.empty()
+                progress_bar = st.progress(0)
+                total = len(blocchi_da_revisionare)
+                count = 0
+                for uid, blocco in blocchi_da_revisionare.items():
+                    st.markdown(f"**{blocco}**")
+                    azione = st.radio("Azione per questo blocco:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
+                    if azione == "Riscrivi":
+                        tono = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
+                        prev_blocco, next_blocco = extract_context(paragrafi, blocco)
+                        attempts = 0
+                        mod_blocco = ""
+                        while attempts < 3:
+                            mod_blocco = ai_rewrite_text(blocco, prev_blocco, next_blocco, tono)
+                            if "Errore" not in mod_blocco:
+                                break
+                            attempts += 1
+                        modifications[blocco] = mod_blocco
+                    elif azione == "Elimina":
+                        modifications[blocco] = ""
+                    else:
+                        modifications[blocco] = blocco
+                    count += 1
+                    progress_bar.progress(count / total)
+                    progress_text.text(f"Elaborati {count} di {total} blocchi...")
+                # Se il flag di conversione globale è attivo, applica la conversione anche ai testi di modifica
+                if global_conversion:
+                    for key in modifications:
+                        modifications[key] = convert_first_singular_to_plural(modifications[key])
+                if st.button("✍️ Genera PDF Revisionato"):
+                    with st.spinner("🔄 Riscrittura in corso..."):
+                        revised_pdf = process_pdf_with_overlay(uploaded_file, modifications)
+                    st.success("✅ Revisione completata!")
+                    st.download_button("📥 Scarica PDF Revisionato", revised_pdf, "document_revised.pdf", "application/pdf")
+            else:
+                st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel documento PDF.")
