@@ -11,24 +11,24 @@ from docx import Document
 from PyPDF2 import PdfReader
 from fpdf import FPDF
 
-# Carica le variabili d'ambiente dal file API.env
+# Carica le variabili d'ambiente dal file .env (utile in locale)
 load_dotenv()
 
 # Configurazione logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Recupera la chiave API da una variabile d'ambiente
-API_KEY = os.getenv("OPENROUTER_API_KEY")
+# Recupera la chiave API: prima dalle variabili d'ambiente, poi da st.secrets
+API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
 if not API_KEY:
-    st.error("⚠️ Errore: API Key di OpenRouter non trovata! Impostala nel file .env.")
+    st.error("⚠️ Errore: API Key di OpenRouter non trovata! Impostala come variabile d'ambiente o in st.secrets.")
     logger.error("API Key non trovata. L'applicazione si interrompe.")
     st.stop()
 
 # Inizializza il client OpenAI per OpenRouter
 client = openai.OpenAI(api_key=API_KEY, base_url="https://openrouter.ai/api/v1")
 
-# Definizione dei pattern critici (regex) per identificare blocchi sensibili
+# Definizione dei pattern critici per identificare blocchi sensibili
 CRITICAL_PATTERNS = [
     r"\bIlias Contreas\b",
     r"\bIlias\b",
