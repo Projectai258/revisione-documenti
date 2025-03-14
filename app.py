@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
 if not API_KEY:
     st.error("⚠️ Errore: API Key di OpenRouter non trovata! Impostala come variabile d'ambiente o in st.secrets.")
-    logger.error("API Key non trovata. L'applicazione si interrompe.")
     st.stop()
 
 # Inizializza il client OpenAI per OpenRouter
@@ -83,9 +82,9 @@ def ai_rewrite_text(text, prev_text, next_text, tone):
     )
     try:
         response = client.chat.completions.create(
-            model="google/gemini-exp-1206:free",
+            model="google/gemini-2.0-pro-exp-02-05:free"",
             messages=[{"role": "system", "content": prompt}],
-            max_tokens=50
+            max_tokens=70
         )
         if response and hasattr(response, "choices") and response.choices:
             return response.choices[0].message.content.strip()
