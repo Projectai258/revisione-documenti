@@ -14,21 +14,21 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 🔑 Carica la chiave API di OpenRouter (assicurati che sia relativa al modello google/gemini-exp-1206:free)
-OPENROUTER_API_KEY = "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"
-if not OPENROUTER_API_KEY:
-    st.error("⚠️ Errore: API Key di OpenRouter non trovata! Assicurati di averla impostata come variabile d'ambiente.")
+# Carica la chiave API da variabile d'ambiente (o da st.secrets)
+API_KEY = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
+if not API_KEY:
+    st.error("⚠️ Errore: API Key di OpenRouter non trovata! Impostala come variabile d'ambiente o in st.secrets.")
     logger.error("API Key non trovata. L'applicazione si interrompe.")
     st.stop()
 
 # Inizializza il client OpenAI per OpenRouter
-client = openai.OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
+client = openai.OpenAI(api_key=API_KEY, base_url="https://openrouter.ai/api/v1")
 
-# 🛑 Pattern critici (pre-compilati per efficienza)
+# Definizione dei pattern critici (regex) per identificare blocchi sensibili
 CRITICAL_PATTERNS = [
-    r"\bIlias Contreas\b",  
-    r"\bIlias\b",  
-    r"\bContreas\b",  
+    r"\bIlias Contreas\b",
+    r"\bIlias\b",
+    r"\bContreas\b",
     r"\bJoey\b",
     r"\bMya\b",
     r"\bmia moglie\b",
@@ -48,7 +48,7 @@ CRITICAL_PATTERNS = [
 ]
 compiled_patterns = [re.compile(p, re.IGNORECASE) for p in CRITICAL_PATTERNS]
 
-# 🔹 Opzioni di tono (non vengono visualizzate nell'interfaccia)
+# Opzioni di tono per la riscrittura
 TONE_OPTIONS = {
     "Stile originale": "Mantieni lo stesso stile del testo originale, stessa struttura della frase.",
     "Formale": "Riscrivi in modo formale e professionale.",
@@ -60,7 +60,7 @@ TONE_OPTIONS = {
 }
 
 def extract_context(blocks, selected_block):
-    """Trova il blocco precedente e successivo per dare contesto."""
+    """Estrae il blocco precedente e successivo per fornire contesto al modello."""
     try:
         index = blocks.index(selected_block)
     except ValueError:
@@ -71,15 +71,15 @@ def extract_context(blocks, selected_block):
     return prev_block, next_block
 
 def ai_rewrite_text(text, prev_text, next_text, tone):
-    """Prompt ottimizzato per richiedere la riscrittura del testo all'AI, usando il modello google/gemini-exp-1206:free."""
+    """Richiede all'API di riscrivere il testo in base al tono selezionato."""
     prompt = (
-        f"Context:\nPreceding: {prev_text}\nText: {text}\nFollowing: {next_text}\n\n"
-        f"Rewrite the 'Text' in {tone} style. Remove any personal or identifiable details. "
-        f"Return only ONE sentence with no additional commentary."
+        f"Contesto:\nPrecedente: {prev_text}\nTesto: {text}\nSuccessivo: {next_text}\n\n"
+        f"Riscrivi il 'Testo' in tono '{tone}'. Rimuovi eventuali dettagli personali o identificabili. "
+        "Rispondi con UNA sola frase, senza ulteriori commenti."
     )
     try:
         response = client.chat.completions.create(
-            model="google/gemini-exp-1206:free",  # Utilizzo del modello corretto
+            model="google/gemini-exp-1206:free",
             messages=[{"role": "system", "content": prompt}],
             max_tokens=50
         )
@@ -90,11 +90,11 @@ def ai_rewrite_text(text, prev_text, next_text, tone):
         return error_message
     except Exception as e:
         error_message = f"⚠️ Errore nell'elaborazione: {e}"
-        logger.error(f"Errore nella richiesta API: {e}")
+        logger.error(error_message)
         return error_message
 
 def process_html_content(html_content, modifications, highlight=False):
-    """Elabora il contenuto HTML sostituendo i blocchi modificati (inclusi tag h5)."""
+    """Sostituisce i blocchi modificati all'interno del contenuto HTML."""
     soup = BeautifulSoup(html_content, "html.parser")
     for tag in soup.find_all(["p", "span", "div", "li", "a", "h5"]):
         if tag.string:
@@ -111,7 +111,7 @@ def process_html_content(html_content, modifications, highlight=False):
     return str(soup)
 
 def generate_html_preview(blocks, modifications, highlight=False):
-    """Genera un'anteprima in HTML da una lista di blocchi testuali."""
+    """Genera un'anteprima HTML evidenziata."""
     html = ""
     for block in blocks:
         mod_text = modifications.get(block, block)
@@ -121,6 +121,49 @@ def generate_html_preview(blocks, modifications, highlight=False):
             html += f"<p>{mod_text}</p>"
     return html
 
+def process_file_content(file_content, file_extension):
+    """Elabora il contenuto in base al tipo di file e ritorna una tupla (lista blocchi, contenuto originale)"""
+    if file_extension == "html":
+        html_content = file_content
+    elif file_extension == "md":
+        html_content = markdown.markdown(file_content)
+    else:
+        html_content = ""
+    if html_content:
+        soup = BeautifulSoup(html_content, "html.parser")
+        blocks = [tag.string.strip() for tag in soup.find_all(["p", "span", "div", "li", "a", "h5"]) if tag.string]
+        return blocks, html_content
+    return [], ""
+
+def process_doc_file(uploaded_file):
+    """Estrae i paragrafi da un file Word."""
+    try:
+        doc = Document(uploaded_file)
+        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        return paragraphs
+    except Exception as e:
+        st.error(f"Errore nell'apertura del file Word: {e}")
+        st.stop()
+
+def process_pdf_file(uploaded_file):
+    """Estrae il testo da un file PDF."""
+    try:
+        pdf_reader = PdfReader(uploaded_file)
+    except Exception as e:
+        st.error(f"Errore nell'apertura del file PDF: {e}")
+        st.stop()
+    paragraphs = []
+    for page in pdf_reader.pages:
+        text = page.extract_text()
+        if text:
+            paragraphs.extend([line.strip() for line in text.split("\n") if line.strip()])
+    return paragraphs
+
+def filtra_blocchi(blocchi):
+    """Filtra i blocchi che corrispondono a uno dei pattern critici."""
+    return {f"{i}_{b}": b for i, b in enumerate(blocchi) if any(pattern.search(b) for pattern in compiled_patterns)}
+
+# Configurazione Streamlit
 st.set_page_config(page_title="Revisione Documenti", layout="wide")
 st.title("📄 Revisione Documenti")
 st.write("Carica un file (HTML, Markdown, Word o PDF) e scegli i blocchi di testo da revisionare.")
@@ -131,38 +174,36 @@ if uploaded_file is not None:
     file_extension = uploaded_file.name.split('.')[-1].lower()
     modifications = {}
     
-    # --- Sezione per HTML e Markdown ---
     if file_extension in ["html", "md"]:
+        # Elaborazione per HTML e Markdown
         file_content = uploaded_file.read().decode("utf-8")
-        html_content = file_content if file_extension == "html" else markdown.markdown(file_content)
-        soup = BeautifulSoup(html_content, "html.parser")
-        blocks = [tag.string.strip() for tag in soup.find_all(["p", "span", "div", "li", "a", "h5"]) if tag.string]
-        blocks_to_review = {f"{i}_{b}": b for i, b in enumerate(blocks) if any(pattern.search(b) for pattern in compiled_patterns)}
+        blocchi, html_content = process_file_content(file_content, file_extension)
+        blocchi_da_revisionare = filtra_blocchi(blocchi)
         
-        if blocks_to_review:
+        if blocchi_da_revisionare:
             st.subheader("📌 Blocchi da revisionare")
             progress_text = st.empty()
             progress_bar = st.progress(0)
-            total = len(blocks_to_review)
+            total = len(blocchi_da_revisionare)
             count = 0
-            for uid, block in blocks_to_review.items():
-                st.markdown(f"**{block}**")
-                action = st.radio(f"Azione per:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
-                if action == "Riscrivi":
-                    selected_tone = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
-                    prev_block, next_block = extract_context(blocks, block)
+            for uid, blocco in blocchi_da_revisionare.items():
+                st.markdown(f"**{blocco}**")
+                azione = st.radio("Azione per questo blocco:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
+                if azione == "Riscrivi":
+                    tono = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
+                    prev_blocco, next_blocco = extract_context(blocchi, blocco)
                     attempts = 0
-                    mod_block = ""
+                    mod_blocco = ""
                     while attempts < 3:
-                        mod_block = ai_rewrite_text(block, prev_block, next_block, selected_tone)
-                        if "Errore" not in mod_block:
+                        mod_blocco = ai_rewrite_text(blocco, prev_blocco, next_blocco, tono)
+                        if "Errore" not in mod_blocco:
                             break
                         attempts += 1
-                    modifications[block] = mod_block
-                elif action == "Elimina":
-                    modifications[block] = ""
-                elif action == "Ignora":
-                    modifications[block] = block
+                    modifications[blocco] = mod_blocco
+                elif azione == "Elimina":
+                    modifications[blocco] = ""
+                else:  # Ignora
+                    modifications[blocco] = blocco
                 count += 1
                 progress_bar.progress(count / total)
                 progress_text.text(f"Elaborati {count} di {total} blocchi...")
@@ -178,53 +219,48 @@ if uploaded_file is not None:
         else:
             st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel testo.")
     
-    # --- Sezione per file Word ---
     elif file_extension in ["doc", "docx"]:
-        try:
-            doc = Document(uploaded_file)
-        except Exception as e:
-            st.error(f"Errore nell'apertura del file Word: {e}")
-            st.stop()
-        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip() != ""]
-        blocks_to_review = {f"{i}_{p}": p for i, p in enumerate(paragraphs) if any(pattern.search(p) for pattern in compiled_patterns)}
+        # Elaborazione per file Word
+        paragrafi = process_doc_file(uploaded_file)
+        blocchi_da_revisionare = filtra_blocchi(paragrafi)
         
-        if blocks_to_review:
+        if blocchi_da_revisionare:
             st.subheader("📌 Paragrafi da revisionare")
             progress_text = st.empty()
             progress_bar = st.progress(0)
-            total = len(blocks_to_review)
+            total = len(blocchi_da_revisionare)
             count = 0
-            for uid, paragraph in blocks_to_review.items():
-                st.markdown(f"**{paragraph}**")
-                action = st.radio(f"Azione per:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
-                if action == "Riscrivi":
-                    selected_tone = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
-                    prev_par, next_par = extract_context(paragraphs, paragraph)
+            for uid, paragrafo in blocchi_da_revisionare.items():
+                st.markdown(f"**{paragrafo}**")
+                azione = st.radio("Azione per questo paragrafo:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
+                if azione == "Riscrivi":
+                    tono = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
+                    prev_par, next_par = extract_context(paragrafi, paragrafo)
                     attempts = 0
                     mod_par = ""
                     while attempts < 3:
-                        mod_par = ai_rewrite_text(paragraph, prev_par, next_par, selected_tone)
+                        mod_par = ai_rewrite_text(paragrafo, prev_par, next_par, tono)
                         if "Errore" not in mod_par:
                             break
                         attempts += 1
-                    modifications[paragraph] = mod_par
-                elif action == "Elimina":
-                    modifications[paragraph] = ""
-                elif action == "Ignora":
-                    modifications[paragraph] = paragraph
+                    modifications[paragrafo] = mod_par
+                elif azione == "Elimina":
+                    modifications[paragrafo] = ""
+                else:
+                    modifications[paragrafo] = paragrafo
                 count += 1
                 progress_bar.progress(count / total)
                 progress_text.text(f"Elaborati {count} di {total} paragrafi...")
             
             if st.button("✍️ Genera Documento Word Revisionato"):
                 with st.spinner("🔄 Riscrittura in corso..."):
-                    new_doc = Document()
-                    for par in paragraphs:
-                        new_doc.add_paragraph(modifications.get(par, par))
+                    nuovo_doc = Document()
+                    for par in paragrafi:
+                        nuovo_doc.add_paragraph(modifications.get(par, par))
                     buffer = io.BytesIO()
-                    new_doc.save(buffer)
+                    nuovo_doc.save(buffer)
                     st.session_state["final_docx"] = buffer.getvalue()
-                    preview_html = generate_html_preview(paragraphs, modifications, highlight=True)
+                    preview_html = generate_html_preview(paragrafi, modifications, highlight=True)
                 st.success("✅ Revisione completata!")
                 st.subheader("🌍 Anteprima con Testo Evidenziato")
                 st.components.v1.html(preview_html, height=500, scrolling=True)
@@ -232,44 +268,35 @@ if uploaded_file is not None:
         else:
             st.info("Non sono state trovate corrispondenze per i criteri di ricerca nel documento Word.")
     
-    # --- Sezione per file PDF ---
     elif file_extension == "pdf":
-        try:
-            pdf_reader = PdfReader(uploaded_file)
-        except Exception as e:
-            st.error(f"Errore nell'apertura del file PDF: {e}")
-            st.stop()
-        paragraphs = []
-        for page in pdf_reader.pages:
-            text = page.extract_text()
-            if text:
-                paragraphs.extend([line.strip() for line in text.split("\n") if line.strip() != ""])
-        blocks_to_review = {f"{i}_{p}": p for i, p in enumerate(paragraphs) if any(pattern.search(p) for pattern in compiled_patterns)}
+        # Elaborazione per file PDF
+        paragrafi = process_pdf_file(uploaded_file)
+        blocchi_da_revisionare = filtra_blocchi(paragrafi)
         
-        if blocks_to_review:
+        if blocchi_da_revisionare:
             st.subheader("📌 Blocchi di testo da revisionare (PDF)")
             progress_text = st.empty()
             progress_bar = st.progress(0)
-            total = len(blocks_to_review)
+            total = len(blocchi_da_revisionare)
             count = 0
-            for uid, block in blocks_to_review.items():
-                st.markdown(f"**{block}**")
-                action = st.radio(f"Azione per:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
-                if action == "Riscrivi":
-                    selected_tone = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
-                    prev_block, next_block = extract_context(paragraphs, block)
+            for uid, blocco in blocchi_da_revisionare.items():
+                st.markdown(f"**{blocco}**")
+                azione = st.radio("Azione per questo blocco:", ["Riscrivi", "Elimina", "Ignora"], key=f"action_{uid}")
+                if azione == "Riscrivi":
+                    tono = st.selectbox("Scegli il tono:", list(TONE_OPTIONS.keys()), key=f"tone_{uid}")
+                    prev_blocco, next_blocco = extract_context(paragrafi, blocco)
                     attempts = 0
-                    mod_block = ""
+                    mod_blocco = ""
                     while attempts < 3:
-                        mod_block = ai_rewrite_text(block, prev_block, next_block, selected_tone)
-                        if "Errore" not in mod_block:
+                        mod_blocco = ai_rewrite_text(blocco, prev_blocco, next_blocco, tono)
+                        if "Errore" not in mod_blocco:
                             break
                         attempts += 1
-                    modifications[block] = mod_block
-                elif action == "Elimina":
-                    modifications[block] = ""
-                elif action == "Ignora":
-                    modifications[block] = block
+                    modifications[blocco] = mod_blocco
+                elif azione == "Elimina":
+                    modifications[blocco] = ""
+                else:
+                    modifications[blocco] = blocco
                 count += 1
                 progress_bar.progress(count / total)
                 progress_text.text(f"Elaborati {count} di {total} blocchi...")
@@ -280,12 +307,12 @@ if uploaded_file is not None:
                     pdf.add_page()
                     pdf.set_auto_page_break(auto=True, margin=15)
                     pdf.set_font("Arial", size=12)
-                    for par in paragraphs:
+                    for par in paragrafi:
                         pdf.multi_cell(0, 10, modifications.get(par, par))
                     pdf_buffer = io.BytesIO()
                     pdf.output(pdf_buffer, 'F')
                     st.session_state["final_pdf"] = pdf_buffer.getvalue()
-                    preview_html = generate_html_preview(paragraphs, modifications, highlight=True)
+                    preview_html = generate_html_preview(paragrafi, modifications, highlight=True)
                 st.success("✅ Revisione completata!")
                 st.subheader("🌍 Anteprima con Testo Evidenziato")
                 st.components.v1.html(preview_html, height=500, scrolling=True)
