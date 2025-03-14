@@ -100,7 +100,7 @@ def ai_rewrite_text(text, prev_text, next_text, tone):
     )
     try:
         response = client.chat.completions.create(
-            model="google/gemini-2.0-pro-exp-02-05:free",  # o qualunque altro modello tu voglia
+            model="google/gemini-2.0-pro-exp-02-05:free",  # Sostituisci con il modello desiderato
             messages=[{"role": "system", "content": prompt}],
             max_tokens=50
         )
@@ -329,9 +329,17 @@ if uploaded_file is not None:
                     pdf = FPDF()
                     pdf.add_page()
                     pdf.set_auto_page_break(auto=True, margin=15)
-                    pdf.set_font("Arial", size=12)
+                    
+                    # -- AGGIUNTA: Registra e usa un font TTF con supporto Unicode --
+                    # Assicurati che "DejaVuSansCondensed.ttf" sia presente nella stessa cartella di app.py
+                    font_path = os.path.join(os.path.dirname(__file__), "DejaVuSansCondensed.ttf")
+                    pdf.add_font("DejaVu", "", font_path, uni=True)
+                    pdf.set_font("DejaVu", "", 12)
+                    # ------------------------------------------------------------
+
                     for par in paragrafi:
-                        pdf.multi_cell(0, 10, modifications.get(par, par))
+                        testo_finale = modifications.get(par, par)
+                        pdf.multi_cell(0, 10, testo_finale)
                     pdf_buffer = io.BytesIO()
                     pdf.output(pdf_buffer, 'F')
                     st.session_state["final_pdf"] = pdf_buffer.getvalue()
