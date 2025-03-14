@@ -11,6 +11,8 @@ from docx import Document
 from PyPDF2 import PdfReader
 from fpdf import FPDF
 
+st.write("Contenuto di st.secrets:", st.secrets)
+
 # Carica le variabili d'ambiente dal file .env (utile in locale)
 load_dotenv()
 
@@ -26,8 +28,6 @@ if not API_KEY:
 
 # Inizializza il client OpenAI per OpenRouter
 client = openai.OpenAI(api_key=API_KEY, base_url="https://openrouter.ai/api/v1")
-
-st.write("Contenuto di st.secrets:", st.secrets)
 
 # Definizione dei pattern critici per identificare blocchi sensibili
 CRITICAL_PATTERNS = [
